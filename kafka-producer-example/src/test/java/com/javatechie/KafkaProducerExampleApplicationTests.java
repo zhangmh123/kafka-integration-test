@@ -1,13 +1,13 @@
 package com.javatechie;
-
 import com.javatechie.dto.Customer;
 import com.javatechie.service.KafkaMessagePublisher;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -17,21 +17,55 @@ import java.util.concurrent.TimeUnit;
 
 import static org.awaitility.Awaitility.await;
 
-
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest
 @Testcontainers
-public class KafkaProducerExampleApplicationTests {
+class KafkaProducerExampleApplicationTests {
+
+    // Use official Apache Kafka image (native or standard)
+//    @Container
+//    @ServiceConnection
+//    static KafkaContainer kafka = new KafkaContainer(
+//            DockerImageName.parse("apache/kafka:4.1.1") // Supports KRaft natively
+//    );
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:latest"));
+    static final KafkaContainer kafka = new KafkaContainer(
+            DockerImageName.parse("apache/kafka:4.1.1") // Latest 2026 KRaft image
+    )
+            // 1. Set the Role INSIDE the container environment
+            .withEnv("KAFKA_PROCESS_ROLES", "broker,controller")
+            .withEnv("KAFKA_NODE_ID", "1")
+            .withEnv("KAFKA_CONTROLLER_QUORUM_VOTERS", "1@localhost:9093");
 
     @DynamicPropertySource
-    public static void initKafkaProperties(DynamicPropertyRegistry registry) {
+    static void overrideProperties(DynamicPropertyRegistry registry) {
+        // 2. Map the container's dynamic port to Spring's bootstrap-servers property
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
+
+        // You can also pass the process roles to the Spring context if your
+        // code specifically reads them for custom logic:
+        registry.add("custom.kafka.roles", () -> "broker,controller");
     }
 
     @Autowired
+    private KafkaTemplate<String, String> kafkaTemplate;
+
+    @Autowired
     private KafkaMessagePublisher publisher;
+
+    @Test
+    void testProducerConsumerFlow() {
+        String topic = "test-topic-2026";
+        String message = "Hello from Testcontainers!";
+
+        kafkaTemplate.send(topic, message);
+
+        // Use Awaitility for asynchronous assertions
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            // Verify your listener processed the message (e.g., check DB or a mock)
+            // Example: assertThat(service.getReceivedCount()).isEqualTo(1);
+        });
+    }
 
     @Test
     public void testSendEventsToTopic() {
@@ -41,5 +75,4 @@ public class KafkaProducerExampleApplicationTests {
                     // assert statement
                 });
     }
-
 }
